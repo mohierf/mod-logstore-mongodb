@@ -35,6 +35,8 @@ import datetime
 import re
 import sys
 import pymongo
+from pymongo import MongoClient
+import traceback
 
 from shinken.objects.service import Service
 from shinken.modulesctx import modulesctx
@@ -42,13 +44,13 @@ from shinken.modulesctx import modulesctx
 # Import a class from the livestatus module, should be already loaded!
 livestatus = modulesctx.get_module('livestatus')
 
-# when livestatus will be correctly setup, replace:
 LiveStatusStack = livestatus.LiveStatusStack
-LOGCLASS_INVALID = livestatus.LOGCLASS_INVALID
-Logline = livestatus.Logline
-# by:
-#from livestatus import LiveStatusStack
-#from livestatus.log_line import LOGCLASS_INVALID, Logline
+# LOGCLASS_INVALID = livestatus.LOGCLASS_INVALID
+# Logline = livestatus.Logline
+from log_line import (
+    Logline,
+    LOGCLASS_INVALID
+)
 
 
 
@@ -92,7 +94,6 @@ class LiveStatusLogStoreError(Exception):
 
 
 class LiveStatusLogStoreMongoDB(BaseModule):
-
     def __init__(self, modconf):
         BaseModule.__init__(self, modconf)
         self.plugins = []
@@ -150,9 +151,10 @@ class LiveStatusLogStoreMongoDB(BaseModule):
             else:
                 # Old versions of pymongo do not known about fsync
                 if ReplicaSetConnection:
-                    self.conn = pymongo.Connection(self.mongodb_uri, fsync=self.mongodb_fsync)
+                    client = MongoClient()
+                    self.conn = MongoClient(self.mongodb_uri, fsync=self.mongodb_fsync)
                 else:
-                    self.conn = pymongo.Connection(self.mongodb_uri)
+                    self.conn = MongoClient(self.mongodb_uri)
             self.db = self.conn[self.database]
             self.db[self.collection].ensure_index([('host_name', pymongo.ASCENDING), ('time', pymongo.ASCENDING), ('lineno', pymongo.ASCENDING)], name='logs_idx')
             self.db[self.collection].ensure_index([('time', pymongo.ASCENDING), ('lineno', pymongo.ASCENDING)], name='time_1_lineno_1')
@@ -301,10 +303,10 @@ class LiveStatusLogStoreMongoDB(BaseModule):
         # The filters are text fragments which are put together to form a sql where-condition finally.
         # Add parameter Class (Host, Service), lookup datatype (default string), convert reference
         # which attributes are suitable for a sql statement
-        good_attributes = ['time', 'attempt', 'logclass', 'command_name', 'comment', 'contact_name', 'message', 'host_name', 'plugin_output', 'service_description', 'state', 'state_type', 'type']
+        good_attributes = ['time', 'attempt', 'logclass', 'command_name', 'comment', 'contact_name', 'host_name', 'plugin_output', 'service_description', 'state', 'state_type', 'type']
         good_operators = ['=', '!=']
         #  put strings in '' for the query
-        string_attributes = ['command_name', 'comment', 'contact_name', 'host_name', 'message', 'plugin_output', 'service_description', 'state_type', 'type']
+        string_attributes = ['command_name', 'comment', 'contact_name', 'host_name', 'plugin_output', 'service_description', 'state_type', 'type']
         if attribute in string_attributes:
             reference = "'%s'" % reference
 
@@ -457,3 +459,5 @@ class LiveStatusMongoStack(LiveStatusStack):
             return lambda: ''
         else:
             return self.get()
+
+			
