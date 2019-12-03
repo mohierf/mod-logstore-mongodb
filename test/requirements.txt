@@ -1,2 +1,30 @@
+# Python requirements for unit tests
 -r ../requirements.txt
+
+# Shinken master branch - see setup_module_test.sh
+### -e git+https://github.com/naparuba/shinken@master#egg=shinken
+
+# Livestatus modules - specific versions - see setup_module_test.sh
+### -e git+https://github.com/mohierf/mod-livestatus@develop#egg=mod-livestatus
+### -e git+https://github.com/shinken-monitoring/mod-logstore-sqlite@develop#egg=mod-logstore-sqlite
+
+# Static code analysis
+pylint
+pycodestyle
+pep257
+
+# Comment because no tests are executed!
 unittest2
+mock
+
+# Use py.test as test-runner
+pytest
+pytest-cov
+
+# Freeze the time -)
+freezegun
+
+coverage
+
+# Report coverage results to codecov.io
+codecov
