@@ -285,7 +285,60 @@ Columns: time type options state host_name"""
         self.assertTrue(curs[1]['state_type'] == 'HARD')
 
     def test_max_logs_age(self):
-        dbmodconf = Module({
+        # 1 - default
+        db_module_conf = Module({
+            'module_name': 'LogStore',
+            'module_type': 'logstore_mongodb',
+            'mongodb_uri': self.mongo_db_uri,
+            'database': self.cfg_database,
+            'collection': self.cfg_collection,
+            'max_logs_age': '7'
+        })
+
+        livestatus_broker = LiveStatusLogStoreMongoDB(db_module_conf)
+        self.assertEqual(7, livestatus_broker.max_logs_age)
+
+        # 2 - days
+        db_module_conf = Module({
+            'module_name': 'LogStore',
+            'module_type': 'logstore_mongodb',
+            'mongodb_uri': self.mongo_db_uri,
+            'database': self.cfg_database,
+            'collection': self.cfg_collection,
+            'max_logs_age': '7d'
+        })
+
+        livestatus_broker = LiveStatusLogStoreMongoDB(db_module_conf)
+        self.assertEqual(7, livestatus_broker.max_logs_age)
+
+        # 3 - weeks
+        db_module_conf = Module({
+            'module_name': 'LogStore',
+            'module_type': 'logstore_mongodb',
+            'mongodb_uri': self.mongo_db_uri,
+            'database': self.cfg_database,
+            'collection': self.cfg_collection,
+            'max_logs_age': '1w'
+        })
+
+        livestatus_broker = LiveStatusLogStoreMongoDB(db_module_conf)
+        self.assertEqual(7, livestatus_broker.max_logs_age)
+
+        # 4 - months
+        db_module_conf = Module({
+            'module_name': 'LogStore',
+            'module_type': 'logstore_mongodb',
+            'mongodb_uri': self.mongo_db_uri,
+            'database': self.cfg_database,
+            'collection': self.cfg_collection,
+            'max_logs_age': '3m'
+        })
+
+        livestatus_broker = LiveStatusLogStoreMongoDB(db_module_conf)
+        self.assertEqual(3*31, livestatus_broker.max_logs_age)
+
+        # 5 - years
+        db_module_conf = Module({
             'module_name': 'LogStore',
             'module_type': 'logstore_mongodb',
             'mongodb_uri': self.mongo_db_uri,
@@ -294,9 +347,21 @@ Columns: time type options state host_name"""
             'max_logs_age': '7y'
         })
 
-        print(dbmodconf.max_logs_age)
-        livestatus_broker = LiveStatusLogStoreMongoDB(dbmodconf)
+        livestatus_broker = LiveStatusLogStoreMongoDB(db_module_conf)
         self.assertEqual(7*365, livestatus_broker.max_logs_age)
+
+    def test_replica_set(self):
+        db_module_conf = Module({
+            'module_name': 'LogStore',
+            'module_type': 'logstore_mongodb',
+            'mongodb_uri': self.mongo_db_uri,
+            'database': self.cfg_database,
+            'collection': self.cfg_collection,
+            'replica_set': '1'
+        })
+
+        livestatus_broker = LiveStatusLogStoreMongoDB(db_module_conf)
+        self.show_logs()
 
 
 @mock_livestatus_handle_request
@@ -607,7 +672,7 @@ class TestConfigBig(TestConfig):
         # sys.stdout.close()
         # sys.stdout = old_stdout
         # exit(12)
-        self.livestatus_broker.db.commit_and_rotate_log_db()
+        self.livestatus_broker.db.commit_and_rotate_log_db(forced=True)
 
         database = self.cfg_database
         collection = self.cfg_collection
@@ -805,7 +870,7 @@ OutputFormat: json"""
 
         # now delete too old entries from the database (> 14days)
         # that's the job of commit_and_rotate_log_db()
-        self.livestatus_broker.db.commit_and_rotate_log_db()
+        self.livestatus_broker.db.commit_and_rotate_log_db(forced=True)
 
         now = max(times)
         print("Filter database (after log rotation): %d - %s - %s" % (numlogs, min(times), max(times)))

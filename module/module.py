@@ -43,12 +43,6 @@ from shinken.basemodule import BaseModule
 from shinken.log import logger
 from shinken.util import to_bool
 
-# try:
-#     from pymongo import ReplicaSetConnection, ReadPreference
-# except ImportError:
-#     ReplicaSetConnection = None
-#     ReadPreference = None
-
 
 # Import a class from the livestatus module, should be already loaded!
 livestatus_broker = modulesctx.get_module('livestatus')
@@ -75,9 +69,9 @@ def get_instance(plugin):
     return instance
 
 
-def row_factory(cursor, row):
-    """Handler for the sqlite fetch method."""
-    return Logline(cursor.description, row)
+# def row_factory(cursor, row):
+#     """Handler for the sqlite fetch method."""
+#     return Logline(cursor.description, row)
 
 
 class LiveStatusLogStoreError(Exception):
@@ -172,10 +166,6 @@ class LiveStatusLogStoreMongoDB(BaseModule):
                     ('host_name', pymongo.ASCENDING),
                     ('time', pymongo.DESCENDING)
                 ], name='hostname_time')
-            if self.replica_set:
-                pass
-                # This might be a future option prefer_secondary
-                # self.db.read_preference = ReadPreference.SECONDARY
 
             self.is_connected = CONNECTED
             self.next_log_db_rotate = time.time()
@@ -185,9 +175,6 @@ class LiveStatusLogStoreMongoDB(BaseModule):
             # The mongodb is hopefully available until this module is restarted
             raise LiveStatusLogStoreError(err)
         except Exception as err:
-            # If there is a replica_set, but the host is a simple standalone one
-            # we get a "No suitable hosts found" here.
-            # But other reasons are possible too.
             logger.error("[LogStoreMongoDB] Could not open the database: %s", err)
             raise LiveStatusLogStoreError(err)
 
@@ -197,11 +184,11 @@ class LiveStatusLogStoreMongoDB(BaseModule):
     def commit(self):
         pass
 
-    def commit_and_rotate_log_db(self):
+    def commit_and_rotate_log_db(self, forced=False):
         """For a MongoDB there is no rotate, but we will delete old contents."""
         now = time.time()
 
-        if self.next_log_db_rotate > now:
+        if not forced and self.next_log_db_rotate > now:
             return
 
         today = datetime.date.today()
