@@ -260,13 +260,10 @@ class TestConfigSmall(TestConfig):
             print("Logline.lsm_current_host_name", Logline.lsm_current_host_name)
             print("-------------------------------------------")
 
-
-
-
-        print("request logs from", int(now - 3600), int(now + 3600))
-        print("request logs from",
-              time.asctime(time.localtime(int(now - 3600))),
-              time.asctime(time.localtime(int(now + 3600))))
+        print("request logs from %s to %s" % (int(now - 3600), int(now + 3600)))
+        print("request logs from %s to %s"
+              % (time.asctime(time.localtime(int(now - 3600))),
+                 time.asctime(time.localtime(int(now + 3600)))))
         request = """GET log
 Filter: time >= """ + str(int(now - 3600)) + """
 Filter: time <= """ + str(int(now + 3600)) + """
@@ -278,11 +275,11 @@ Columns: time type options state host_name"""
         numlogs = self.livestatus_broker.db.conn[database][collection].count_documents({})
         print("Logs count: %d" % numlogs)
         self.assertTrue(numlogs == 2)
-        curs = self.livestatus_broker.db.conn[database][collection].find()
-        print("Log 0: %s" % curs[0])
-        self.assertTrue(curs[0]['state_type'] == 'SOFT')
-        print("Log 1: %s" % curs[1])
-        self.assertTrue(curs[1]['state_type'] == 'HARD')
+        logs = self.livestatus_broker.db.conn[database][collection].find()
+        print("Log 0: %s" % logs[0])
+        self.assertTrue(logs[0]['state_type'] == 'SOFT')
+        print("Log 1: %s" % logs[1])
+        self.assertTrue(logs[1]['state_type'] == 'HARD')
 
     def test_max_logs_age(self):
         # 1 - default
@@ -363,6 +360,75 @@ Columns: time type options state host_name"""
         livestatus_broker = LiveStatusLogStoreMongoDB(db_module_conf)
         self.show_logs()
 
+    def test_backlog(self):
+        host = self.sched.hosts.find_by_name("test_host_0")
+        now = time.time()
+
+        # Freeze the time !
+        initial_datetime = datetime.datetime(year=2019, month=6, day=1,
+                                             hour=18, minute=30, second=0)
+        with freeze_time(initial_datetime) as frozen_datetime:
+            assert frozen_datetime() == initial_datetime
+
+            # Time warp 1 hour in the past
+            frozen_datetime.tick(delta=datetime.timedelta(hours=-1))
+            # time_hacker.time_warp(-3600)
+
+            host.state = 'DOWN'
+            host.state_type = 'SOFT'
+            host.attempt = 1
+            host.output = "i am down"
+            host.raise_alert_log_entry()
+            # Time warp 1 hour
+            frozen_datetime.tick(delta=datetime.timedelta(hours=1))
+
+            # Here we have one broks for the module - simulate a DB failure to append to the back log!
+            for brok in self.sched.brokers['Default-Broker']['broks']:
+                brok.prepare()
+
+                # Build a log line from the brok and append to the backlog!
+                line = brok.data['log']
+                log_line = Logline(line=line)
+                values = log_line.as_dict()
+                self.livestatus_broker.db.backlog.append(values)
+
+            self.sched.brokers['Default-Broker']['broks'] = []
+
+            host.state = 'UP'
+            host.state_type = 'HARD'
+            host.attempt = 1
+            host.output = "i am up"
+            host.raise_alert_log_entry()
+            # Time warp 1 hour
+            frozen_datetime.tick(delta=datetime.timedelta(hours=1))
+
+            # Send broks to the module - only one brok is sent!
+            self.update_broker()
+
+        # Now we shoud have built two log lines
+        print("request logs from %s to %s" % (int(now - 3600), int(now + 3600)))
+        print("request logs from %s to %s"
+              % (time.asctime(time.localtime(int(now - 3600))),
+                 time.asctime(time.localtime(int(now + 3600)))))
+        request = """GET log
+Filter: time >= """ + str(int(now - 3600)) + """
+Filter: time <= """ + str(int(now + 3600)) + """
+Columns: time type options state host_name"""
+        response, keepalive = self.livestatus_broker.livestatus.handle_request(request)
+        print(response)
+        database = self.cfg_database
+        collection = self.cfg_collection
+        numlogs = self.livestatus_broker.db.conn[database][collection].count_documents({})
+        print("Logs count: %d" % numlogs)
+        self.assertTrue(numlogs == 2)
+        logs = self.livestatus_broker.db.conn[database][collection].find()
+        # First log is the 2nd event...
+        print("Log 0: %s" % logs[0])
+        self.assertTrue(logs[0]['state_type'] == 'HARD')
+        # Second log is the 1st event...
+        print("Log 1: %s" % logs[1])
+        self.assertTrue(logs[1]['state_type'] == 'SOFT')
+        # ... this because of the backlog cache!
 
 @mock_livestatus_handle_request
 class TestConfigBig(TestConfig):
@@ -460,7 +526,7 @@ class TestConfigBig(TestConfig):
 
             for day in xrange(days):
                 sys.stderr.write("%s - day %d started, it is %s and i run %d loops\n" % (
-                    time.strftime("%H:%M:%S"), day, time.ctime(time.time()), loops))
+                    datetime.datetime.now().strftime("%H:%M:%S"), day, time.ctime(time.time()), loops))
 
                 self.scheduler_loop(2, [
                     [test_ok_00, 0, "OK"],
@@ -473,7 +539,8 @@ class TestConfigBig(TestConfig):
 
                 for i in xrange(loops):
                     if i % 10000 == 0:
-                        sys.stderr.write("%s - 10000: %d\n" % (time.strftime("%H:%M:%S"), i))
+                        sys.stderr.write("%s - 10000: %d\n"
+                                         % (datetime.datetime.now().strftime("%H:%M:%S"), i))
 
                     if i % 399 == 0:
                         self.scheduler_loop(3, [
@@ -485,9 +552,10 @@ class TestConfigBig(TestConfig):
                         ])
                         if query_start <= int(time.time()) <= query_end:
                             should_be += 3
-                            sys.stderr.write("%s - now the result should be %s\n" % (time.strftime("%H:%M:%S"), should_be))
+                            sys.stderr.write("%s - now the result should be %s\n"
+                                             % (datetime.datetime.now().strftime("%H:%M:%S"), should_be))
                     # time.sleep(62)
-                    frozen_datetime.tick(delta=datetime.timedelta(seconds=62))
+                    frozen_datetime.tick(delta=datetime.timedelta(seconds=2))
 
                     if i % 399 == 0:
                         self.scheduler_loop(1, [
@@ -499,7 +567,8 @@ class TestConfigBig(TestConfig):
                         ])
                         if query_start <= int(time.time()) <= query_end:
                             should_be += 1
-                            sys.stderr.write("%s - now the result should be %s\n" % (time.strftime("%H:%M:%S"), should_be))
+                            sys.stderr.write("%s - now the result should be %s\n"
+                                             % (datetime.datetime.now().strftime("%H:%M:%S"), should_be))
                     # time.sleep(2)
                     frozen_datetime.tick(delta=datetime.timedelta(seconds=2))
 
@@ -509,7 +578,7 @@ class TestConfigBig(TestConfig):
                             [test_ok_01, 2, "CRIT"],
                         ])
                     # time.sleep(62)
-                    frozen_datetime.tick(delta=datetime.timedelta(seconds=62))
+                    frozen_datetime.tick(delta=datetime.timedelta(seconds=2))
 
                     if i % 9 == 0:
                         self.scheduler_loop(1, [
@@ -528,7 +597,7 @@ class TestConfigBig(TestConfig):
                             [test_host_099, 2, "DOWN"],
                         ])
                     # time.sleep(62)
-                    frozen_datetime.tick(delta=datetime.timedelta(seconds=62))
+                    frozen_datetime.tick(delta=datetime.timedelta(seconds=2))
 
                     if i % 9 == 0:
                         self.scheduler_loop(3, [
@@ -543,13 +612,14 @@ class TestConfigBig(TestConfig):
 
                     self.update_broker()
                     if i % 1000 == 0:
-                        sys.stderr.write("%s - DB commit\n" % time.strftime("%H:%M:%S"))
+                        sys.stderr.write("%s - DB commit\n"
+                                         % datetime.datetime.now().strftime("%H:%M:%S"))
                         self.livestatus_broker.db.commit()
 
                 self.livestatus_broker.db.commit()
 
                 sys.stderr.write("%s - day %d ended, it is %s\n" % (
-                    time.strftime("%H:%M:%S"), day, time.ctime(time.time())))
+                    datetime.datetime.now().strftime("%H:%M:%S"), day, time.ctime(time.time())))
 
             sys.stdout.close()
             sys.stdout = old_stdout
@@ -671,7 +741,7 @@ class TestConfigBig(TestConfig):
         #
         # sys.stdout.close()
         # sys.stdout = old_stdout
-        # exit(12)
+        exit(12)
         self.livestatus_broker.db.commit_and_rotate_log_db(forced=True)
 
         database = self.cfg_database
