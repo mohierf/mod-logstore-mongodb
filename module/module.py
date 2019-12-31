@@ -153,15 +153,15 @@ class LiveStatusLogStoreMongoDB(BaseModule):
             #         ('time', pymongo.ASCENDING),
             #         ('lineno', pymongo.ASCENDING)
             #     ], name='time_1_lineno_1')
-            self.db[self.collection].ensure_index(
+            self.db[self.collection].create_index(
                 [
                     ('host_name', pymongo.ASCENDING)
                 ], name='hostname')
-            self.db[self.collection].ensure_index(
+            self.db[self.collection].create_index(
                 [
                     ('time', pymongo.DESCENDING)
                 ], name='time')
-            self.db[self.collection].ensure_index(
+            self.db[self.collection].create_index(
                 [
                     ('host_name', pymongo.ASCENDING),
                     ('time', pymongo.DESCENDING)

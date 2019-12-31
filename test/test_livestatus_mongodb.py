@@ -490,10 +490,8 @@ class TestConfigBig(TestConfig):
         # todo: all this stuff does not look very time zone aware... naive dates :(
         etime = time.time()
         print("now it is", time.ctime(etime))
-        print("now it is", time.gmtime(etime))
         etime_midnight = (etime - (etime % 86400)) + time.altzone
         print("midnight was", time.ctime(etime_midnight))
-        print("midnight was", time.gmtime(etime_midnight))
         query_start = etime_midnight - (days - 1) * 86400
         query_end = etime_midnight
         print("query_start", time.ctime(query_start))
@@ -512,21 +510,24 @@ class TestConfigBig(TestConfig):
             loops = int(86400 / 192)
             # Time warp N days back
             # time_hacker.time_warp(-1 * days * 86400)
-            frozen_datetime.tick(delta=datetime.timedelta(days=-days))
-            print("- time warp back to %s" % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            frozen_datetime.tick(delta=datetime.timedelta(days=-(days)))
+            print("%s - time warp back to %s" % (time.strftime("%H:%M:%S"), time.strftime("%Y-%m-%d %H:%M:%S")))
 
             # run silently
             old_stdout = sys.stdout
             sys.stdout = open(os.devnull, "w")
 
             should_be = 0
-            days = 4
             sys.stderr.write("%s - query_start: %s\n" % (time.strftime("%H:%M:%S"), time.ctime(query_start)))
             sys.stderr.write("%s - query_end: %s\n" % (time.strftime("%H:%M:%S"), time.ctime(query_end)))
 
             for day in xrange(days):
+                # frozen_datetime.tick(delta=datetime.timedelta(days=1))
+                # frozen_datetime.move_to(
+                #     datetime.datetime(year=2, month=8, day=13, hour=14, minute=5, second=0))
+
                 sys.stderr.write("%s - day %d started, it is %s and i run %d loops\n" % (
-                    datetime.datetime.now().strftime("%H:%M:%S"), day, time.ctime(time.time()), loops))
+                    time.strftime("%H:%M:%S"), day, time.ctime(time.time()), loops))
 
                 self.scheduler_loop(2, [
                     [test_ok_00, 0, "OK"],
@@ -535,213 +536,90 @@ class TestConfigBig(TestConfig):
                     [test_ok_16, 0, "OK"],
                     [test_ok_99, 0, "OK"],
                 ])
+                sys.stderr.write("%s - hosts are up\n" % (time.strftime("%H:%M:%S")))
                 self.update_broker()
 
-                for i in xrange(loops):
-                    if i % 10000 == 0:
-                        sys.stderr.write("%s - 10000: %d\n"
-                                         % (datetime.datetime.now().strftime("%H:%M:%S"), i))
+                # Some hosts change state
+                # +1h, go down
+                frozen_datetime.tick(delta=datetime.timedelta(minutes=60))
+                self.scheduler_loop(3, [
+                    [test_host_005, 2, "DOWN"],
+                ])
+                self.scheduler_loop(3, [
+                    [test_host_099, 2, "DOWN"],
+                ])
+                sys.stderr.write("%s - hosts go down\n" % (time.strftime("%H:%M:%S")))
 
-                    if i % 399 == 0:
-                        self.scheduler_loop(3, [
-                            [test_ok_00, 1, "WARN"],
-                            [test_ok_01, 2, "CRIT"],
-                            [test_ok_04, 3, "UNKN"],
-                            [test_ok_16, 1, "WARN"],
-                            [test_ok_99, 2, "CRIT"],
-                        ])
-                        if query_start <= int(time.time()) <= query_end:
-                            should_be += 3
-                            sys.stderr.write("%s - now the result should be %s\n"
-                                             % (datetime.datetime.now().strftime("%H:%M:%S"), should_be))
-                    # time.sleep(62)
-                    frozen_datetime.tick(delta=datetime.timedelta(seconds=2))
+                # +1h, return back
+                frozen_datetime.tick(delta=datetime.timedelta(minutes=60))
+                self.scheduler_loop(3, [
+                    [test_host_005, 0, "UP"],
+                ])
+                self.scheduler_loop(3, [
+                    [test_host_099, 0, "UP"],
+                ])
+                sys.stderr.write("%s - hosts recover\n" % (time.strftime("%H:%M:%S")))
+                self.update_broker()
 
-                    if i % 399 == 0:
-                        self.scheduler_loop(1, [
-                            [test_ok_00, 0, "OK"],
-                            [test_ok_01, 0, "OK"],
-                            [test_ok_04, 0, "OK"],
-                            [test_ok_16, 0, "OK"],
-                            [test_ok_99, 0, "OK"],
-                        ])
-                        if query_start <= int(time.time()) <= query_end:
-                            should_be += 1
-                            sys.stderr.write("%s - now the result should be %s\n"
-                                             % (datetime.datetime.now().strftime("%H:%M:%S"), should_be))
-                    # time.sleep(2)
-                    frozen_datetime.tick(delta=datetime.timedelta(seconds=2))
+                # Some services change state
+                # +2h, go bad
+                frozen_datetime.tick(delta=datetime.timedelta(minutes=120))
+                self.scheduler_loop(3, [
+                    [test_ok_00, 1, "WARN"],
+                    [test_ok_01, 2, "CRIT"],
+                ])
+                # +1h, recover
+                frozen_datetime.tick(delta=datetime.timedelta(minutes=60))
+                self.scheduler_loop(1, [
+                    [test_ok_00, 0, "OK"],
+                    [test_ok_01, 0, "OK"],
+                ])
+                sys.stderr.write("%s - services changed and recovered\n" % (time.strftime("%H:%M:%S")))
+                self.update_broker()
 
-                    if i % 9 == 0:
-                        self.scheduler_loop(3, [
-                            [test_ok_00, 1, "WARN"],
-                            [test_ok_01, 2, "CRIT"],
-                        ])
-                    # time.sleep(62)
-                    frozen_datetime.tick(delta=datetime.timedelta(seconds=2))
+                # +1h, go bad
+                frozen_datetime.tick(delta=datetime.timedelta(minutes=60))
+                self.scheduler_loop(3, [
+                    [test_ok_00, 1, "WARN"],
+                    [test_ok_01, 2, "CRIT"],
+                    [test_ok_04, 3, "UNKN"],
+                    [test_ok_16, 1, "WARN"],
+                    [test_ok_99, 2, "CRIT"],
+                ])
+                if query_start <= int(time.time()) <= query_end:
+                    should_be += 3
+                    sys.stderr.write("%s - now the result should be %s\n"
+                                     % (time.strftime("%H:%M:%S"), should_be))
 
-                    if i % 9 == 0:
-                        self.scheduler_loop(1, [
-                            [test_ok_00, 0, "OK"],
-                            [test_ok_01, 0, "OK"],
-                        ])
-                    # time.sleep(2)
-                    frozen_datetime.tick(delta=datetime.timedelta(seconds=2))
+                # +1h, recover
+                frozen_datetime.tick(delta=datetime.timedelta(minutes=60))
+                self.scheduler_loop(2, [
+                    [test_ok_00, 0, "OK"],
+                    [test_ok_01, 0, "OK"],
+                    [test_ok_04, 0, "OK"],
+                    [test_ok_16, 0, "OK"],
+                    [test_ok_99, 0, "OK"],
+                ])
+                if query_start <= int(time.time()) <= query_end:
+                    should_be += 1
+                    sys.stderr.write("%s - now the result should be %s\n"
+                                     % (time.strftime("%H:%M:%S"), should_be))
 
-                    if i % 9 == 0:
-                        self.scheduler_loop(3, [
-                            [test_host_005, 2, "DOWN"],
-                        ])
-                    if i % 2 == 0:
-                        self.scheduler_loop(3, [
-                            [test_host_099, 2, "DOWN"],
-                        ])
-                    # time.sleep(62)
-                    frozen_datetime.tick(delta=datetime.timedelta(seconds=2))
+                sys.stderr.write("%s - services changed and recovered\n" % (time.strftime("%H:%M:%S")))
+                self.update_broker()
 
-                    if i % 9 == 0:
-                        self.scheduler_loop(3, [
-                            [test_host_005, 0, "UP"],
-                        ])
-                    if i % 2 == 0:
-                        self.scheduler_loop(3, [
-                            [test_host_099, 0, "UP"],
-                        ])
-                    # time.sleep(2)
-                    frozen_datetime.tick(delta=datetime.timedelta(seconds=2))
-
-                    self.update_broker()
-                    if i % 1000 == 0:
-                        sys.stderr.write("%s - DB commit\n"
-                                         % datetime.datetime.now().strftime("%H:%M:%S"))
-                        self.livestatus_broker.db.commit()
+                # Make the day have 24 hours -)
+                frozen_datetime.tick(delta=datetime.timedelta(hours=17))
 
                 self.livestatus_broker.db.commit()
 
                 sys.stderr.write("%s - day %d ended, it is %s\n" % (
-                    datetime.datetime.now().strftime("%H:%M:%S"), day, time.ctime(time.time())))
+                    time.strftime("%H:%M:%S"), day, time.ctime(time.time())))
 
             sys.stdout.close()
             sys.stdout = old_stdout
         print("%s - generated" % time.strftime("%H:%M:%S"))
 
-
-        # # |----------|----------|----------|----------|----------|---x
-        # #                                                            etime
-        # #                                                        etime_midnight
-        # #             ---x------
-        # #                etime -  4 days
-        # #                       |---
-        # #                       query_start
-        # #
-        # #                ............................................
-        # #                events in the log database ranging till now
-        # #
-        # #                       |________________________________|
-        # #                       events which will be read from db
-        # #
-
-        # loops = int(86400 / 192)
-        # time_hacker.time_warp(-1 * days * 86400)
-        # print("%s - warp back to %s" % (time.strftime("%H:%M:%S"),
-        #                                 time.ctime(time.time())))
-        # # run silently
-        # old_stdout = sys.stdout
-        # sys.stdout = open(os.devnull, "w")
-        #
-        # should_be = 0
-        # sys.stderr.write("%s - query_start: %s\n" % (time.strftime("%H:%M:%S"), time.ctime(query_start)))
-        # sys.stderr.write("%s - query_end: %s\n" % (time.strftime("%H:%M:%S"), time.ctime(query_end)))
-        # for day in xrange(days):
-        #     sys.stderr.write("%s - day %d started, it is %s and i run %d loops\n" % (
-        #         time.strftime("%H:%M:%S"), day, time.ctime(time.time()), loops))
-        #
-        #     self.scheduler_loop(2, [
-        #         [test_ok_00, 0, "OK"],
-        #         [test_ok_01, 0, "OK"],
-        #         [test_ok_04, 0, "OK"],
-        #         [test_ok_16, 0, "OK"],
-        #         [test_ok_99, 0, "OK"],
-        #     ])
-        #     self.update_broker()
-        #
-        #     for i in xrange(loops):
-        #         if i % 10000 == 0:
-        #             sys.stderr.write("%s - 10000: %d\n" % (time.strftime("%H:%M:%S"), i))
-        #
-        #         if i % 399 == 0:
-        #             self.scheduler_loop(3, [
-        #                 [test_ok_00, 1, "WARN"],
-        #                 [test_ok_01, 2, "CRIT"],
-        #                 [test_ok_04, 3, "UNKN"],
-        #                 [test_ok_16, 1, "WARN"],
-        #                 [test_ok_99, 2, "CRIT"],
-        #             ])
-        #             if query_start <= int(time.time()) <= query_end:
-        #                 should_be += 3
-        #                 sys.stderr.write("%s - now the result should be %s\n" % (time.strftime("%H:%M:%S"), should_be))
-        #         time.sleep(62)
-        #
-        #         if i % 399 == 0:
-        #             self.scheduler_loop(1, [
-        #                 [test_ok_00, 0, "OK"],
-        #                 [test_ok_01, 0, "OK"],
-        #                 [test_ok_04, 0, "OK"],
-        #                 [test_ok_16, 0, "OK"],
-        #                 [test_ok_99, 0, "OK"],
-        #             ])
-        #             if query_start <= int(time.time()) <= query_end:
-        #                 should_be += 1
-        #                 sys.stderr.write("%s - now the result should be %s\n" % (time.strftime("%H:%M:%S"), should_be))
-        #         time.sleep(2)
-        #
-        #         if i % 9 == 0:
-        #             self.scheduler_loop(3, [
-        #                 [test_ok_00, 1, "WARN"],
-        #                 [test_ok_01, 2, "CRIT"],
-        #             ])
-        #         time.sleep(62)
-        #
-        #         if i % 9 == 0:
-        #             self.scheduler_loop(1, [
-        #                 [test_ok_00, 0, "OK"],
-        #                 [test_ok_01, 0, "OK"],
-        #             ])
-        #         time.sleep(2)
-        #
-        #         if i % 9 == 0:
-        #             self.scheduler_loop(3, [
-        #                 [test_host_005, 2, "DOWN"],
-        #             ])
-        #         if i % 2 == 0:
-        #             self.scheduler_loop(3, [
-        #                 [test_host_099, 2, "DOWN"],
-        #             ])
-        #         time.sleep(62)
-        #
-        #         if i % 9 == 0:
-        #             self.scheduler_loop(3, [
-        #                 [test_host_005, 0, "UP"],
-        #             ])
-        #         if i % 2 == 0:
-        #             self.scheduler_loop(3, [
-        #                 [test_host_099, 0, "UP"],
-        #             ])
-        #         time.sleep(2)
-        #
-        #         self.update_broker()
-        #         if i % 1000 == 0:
-        #             sys.stderr.write("%s - DB commit\n" % time.strftime("%H:%M:%S"))
-        #             self.livestatus_broker.db.commit()
-        #
-        #     self.livestatus_broker.db.commit()
-        #
-        #     sys.stderr.write("%s - day %d ended, it is %s\n" % (
-        #         time.strftime("%H:%M:%S"), day, time.ctime(time.time())))
-        #
-        # sys.stdout.close()
-        # sys.stdout = old_stdout
-        exit(12)
         self.livestatus_broker.db.commit_and_rotate_log_db(forced=True)
 
         database = self.cfg_database
