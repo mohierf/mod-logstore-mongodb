@@ -155,7 +155,7 @@ class TestConfig(ShinkenModulesTest):
                 break
             time.sleep(1.0)
         else:
-            print("didn't exited after 30 seconds! killing it..")
+            print("%s - didn't exited after 30 seconds! killing it..." % time.strftime("%H:%M:%S"))
             mp.kill()
         mp.wait()
         print("%s - exited" % time.strftime("%H:%M:%S"))
@@ -189,7 +189,7 @@ class TestConfigSmall(TestConfig):
         self.setup_with_file('etc/shinken_1r_1h_1s.cfg')
         self.testid = str(os.getpid() + random.randint(1, 1000))
 
-        self.cfg_database = 'testtest' + self.testid
+        self.cfg_database = 'test' + self.testid
         self.cfg_collection = 'ls-logs'
 
         dbmodconf = Module({
@@ -219,67 +219,172 @@ class TestConfigSmall(TestConfig):
         host = self.sched.hosts.find_by_name("test_host_0")
         host.__class__.use_aggressive_host_checking = 1
 
-    def test_one_log(self):
-        self.print_header()
-
-        host = self.sched.hosts.find_by_name("test_host_0")
-        now = time.time()
+    def _make_down_up(self, the_host_name, the_date):
+        """Make the host go DOWN 15 minutes after the date and then UP 15 minutes later!"""
+        host = self.sched.hosts.find_by_name(the_host_name)
+        assert host is not None, "Host %s is not known!" % the_host_name
 
         # Freeze the time !
-        initial_datetime = datetime.datetime(year=2019, month=6, day=1,
-                                             hour=18, minute=30, second=0)
-        with freeze_time(initial_datetime) as frozen_datetime:
-            assert frozen_datetime() == initial_datetime
+        with freeze_time(the_date) as frozen_datetime:
 
-            # Time warp 1 hour in the past
-            frozen_datetime.tick(delta=datetime.timedelta(hours=-1))
-            # time_hacker.time_warp(-3600)
+            # Time warp 15 minutes in the future
+            print("Now is: %s / %s" % (time.time(), time.strftime("%H:%M:%S")))
+            frozen_datetime.tick(delta=datetime.timedelta(seconds=900))
+            print("Now is: %s / %s" % (time.time(), time.strftime("%H:%M:%S")))
 
             host.state = 'DOWN'
             host.state_type = 'SOFT'
             host.attempt = 1
             host.output = "i am down"
             host.raise_alert_log_entry()
-            # Time warp 1 hour
-            frozen_datetime.tick(delta=datetime.timedelta(hours=1))
-            # time.sleep(3600)
+            self.update_broker()
+
+            # Time warp 15 minutes in the future
+            frozen_datetime.tick(delta=datetime.timedelta(seconds=900))
+            print("Now is: %s / %s" % (time.time(), time.strftime("%H:%M:%S")))
 
             host.state = 'UP'
             host.state_type = 'HARD'
             host.attempt = 1
             host.output = "i am up"
             host.raise_alert_log_entry()
-            # Time warp 1 hour
-            frozen_datetime.tick(delta=datetime.timedelta(hours=1))
-            # time.sleep(3600)
-
             self.update_broker()
 
-            print("-------------------------------------------")
-            print("Service.lsm_host_name", Service.lsm_host_name)
-            print("Logline.lsm_current_host_name", Logline.lsm_current_host_name)
-            print("-------------------------------------------")
-
-        print("request logs from %s to %s" % (int(now - 3600), int(now + 3600)))
-        print("request logs from %s to %s"
-              % (time.asctime(time.localtime(int(now - 3600))),
-                 time.asctime(time.localtime(int(now + 3600)))))
-        request = """GET log
-Filter: time >= """ + str(int(now - 3600)) + """
-Filter: time <= """ + str(int(now + 3600)) + """
-Columns: time type options state host_name"""
+    def _request(self, request, expected_response_length):
+        print("\n-----\nRequest: %s\n-----\n" % request)
+        tic = time.time()
         response, keepalive = self.livestatus_broker.livestatus.handle_request(request)
-        print(response)
+        tac = time.time()
+        pyresponse = eval(response)
+        print("Result: \n - # records matching the filter: %d\n - duration: %.2f"
+              % (len(pyresponse), tac - tic))
+        print("Response:")
+        for item in pyresponse:
+            print("- %s" % item)
+        self.assertTrue(len(pyresponse) == expected_response_length)
+
+        return pyresponse
+
+    def test_one_log(self):
+        now = time.time()
+        print("Now is: %s / %s" % (now, time.strftime("%H:%M:%S")))
+
+        # Make one DOWN/UP for the host
+        self._make_down_up("test_host_0", datetime.datetime.utcfromtimestamp(now))
+
+        print("----------")
+        print("Request database logs")
         database = self.cfg_database
         collection = self.cfg_collection
         numlogs = self.livestatus_broker.db.conn[database][collection].count_documents({})
-        print("Logs count: %d" % numlogs)
+        print("- total logs count: %d" % numlogs)
         self.assertTrue(numlogs == 2)
         logs = self.livestatus_broker.db.conn[database][collection].find()
-        print("Log 0: %s" % logs[0])
+        print("- log 0: %s" % logs[0])
         self.assertTrue(logs[0]['state_type'] == 'SOFT')
-        print("Log 1: %s" % logs[1])
+        print("- log 1: %s" % logs[1])
         self.assertTrue(logs[1]['state_type'] == 'HARD')
+
+        print("----------")
+        print("Request logs for the host: test_host_9")
+        request = """GET log
+        Filter: host_name = test_host_9
+        Columns: time type options state host_name
+        OutputFormat: json"""
+        tic = time.time()
+        response, keepalive = self.livestatus_broker.livestatus.handle_request(request)
+        tac = time.time()
+        pyresponse = eval(response)
+        print("Result: \n - # records matching the filter: %d\n - duration: %.2f" % (len(pyresponse), tac - tic))
+        print("Response:")
+        for item in pyresponse:
+            print("- %s" % item)
+        # No matching log!
+        self.assertTrue(len(pyresponse) == 0)
+
+        print("Request logs for the host: test_host_0")
+        request = """GET log
+        Filter: host_name = test_host_0
+        Columns: time type options state host_name
+        OutputFormat: json"""
+        tic = time.time()
+        response, keepalive = self.livestatus_broker.livestatus.handle_request(request)
+        tac = time.time()
+        pyresponse = eval(response)
+        print("Result: \n - # records matching the filter: %d\n - duration: %.2f" % (len(pyresponse), tac - tic))
+        print("Response:")
+        for item in pyresponse:
+            print("- %s" % item)
+        # 2 matching logs!
+        self.assertTrue(len(pyresponse) == 2)
+
+        print("----------")
+        print("Request logs in the current hour (from %s to %s)" % (int(now), int(now + 3600)))
+        print("(from %s to %s)" % (time.asctime(time.localtime(int(now))),
+                                   time.asctime(time.localtime(int(now + 3600)))))
+        request = """GET log
+        Filter: time >= """ + str(int(now)) + """
+        Filter: time <= """ + str(int(now + 3600)) + """
+        Columns: time type options state host_name
+        OutputFormat: json"""
+        tic = time.time()
+        response, keepalive = self.livestatus_broker.livestatus.handle_request(request)
+        tac = time.time()
+        pyresponse = eval(response)
+        print("Result: \n - # records matching the filter: %d\n - duration: %.2f"
+              % (len(pyresponse), tac - tic))
+        print("Response:")
+        for item in pyresponse:
+            print("- %s" % item)
+        self.assertTrue(len(pyresponse) == 2)
+
+    def test_several_log(self):
+        now = time.time()
+        print("Now is: %s / %s" % (now, time.strftime("%H:%M:%S")))
+        print("Current hour (from %s to %s)" % (time.asctime(time.localtime(int(now))),
+                                                time.asctime(time.localtime(int(now + 3600)))))
+
+        # Make one DOWN/UP for the host
+        self._make_down_up("test_host_0", datetime.datetime.utcfromtimestamp(now))
+        self._make_down_up("test_router_0", datetime.datetime.utcfromtimestamp(now))
+
+        print("----------")
+        print("Requesting logs in the current hour...")
+        request = """GET log
+        Filter: time >= """ + str(int(now)) + """
+        Filter: time <= """ + str(int(now + 3600)) + """
+        Columns: time type options state host_name
+        OutputFormat: json"""
+        self._request(request, 4)
+
+        print("----------")
+        print("Requesting host alerts for test_host_0 and test_router_0...")
+        request = """GET log
+        Filter: time >= """ + str(int(now)) + """
+        Filter: time <= """ + str(int(now + 3600)) + """
+        Filter: type = HOST ALERT
+        And: 3
+        Filter: host_name = test_host_0
+        Filter: host_name = test_router_0
+        Or: 2
+        And: 2
+        Columns: time type options state host_name
+        OutputFormat: json"""
+        self._request(request, 4)
+
+        print("----------")
+        print("Requesting host alerts for test_host_0...")
+        request = """GET log
+        Filter: time >= """ + str(int(now)) + """
+        Filter: time <= """ + str(int(now + 3600)) + """
+        Filter: type = HOST ALERT
+        And: 3
+        Filter: host_name = test_host_0
+        Or: 1
+        And: 2
+        Columns: time type options state host_name
+        OutputFormat: json"""
+        self._request(request, 2)
 
     def test_max_logs_age(self):
         # 1 - default
@@ -361,15 +466,14 @@ Columns: time type options state host_name"""
         self.show_logs()
 
     def test_backlog(self):
-        host = self.sched.hosts.find_by_name("test_host_0")
         now = time.time()
+        print("Now is: %s / %s" % (now, time.strftime("%H:%M:%S")))
+
+        host = self.sched.hosts.find_by_name("test_host_0")
+        assert host is not None, "Host test_host_0 is not known!"
 
         # Freeze the time !
-        initial_datetime = datetime.datetime(year=2019, month=6, day=1,
-                                             hour=18, minute=30, second=0)
-        with freeze_time(initial_datetime) as frozen_datetime:
-            assert frozen_datetime() == initial_datetime
-
+        with freeze_time(datetime.datetime.utcfromtimestamp(now)) as frozen_datetime:
             # Time warp 1 hour in the past
             frozen_datetime.tick(delta=datetime.timedelta(hours=-1))
             # time_hacker.time_warp(-3600)
@@ -405,21 +509,12 @@ Columns: time type options state host_name"""
             # Send broks to the module - only one brok is sent!
             self.update_broker()
 
-        # Now we shoud have built two log lines
-        print("request logs from %s to %s" % (int(now - 3600), int(now + 3600)))
-        print("request logs from %s to %s"
-              % (time.asctime(time.localtime(int(now - 3600))),
-                 time.asctime(time.localtime(int(now + 3600)))))
-        request = """GET log
-Filter: time >= """ + str(int(now - 3600)) + """
-Filter: time <= """ + str(int(now + 3600)) + """
-Columns: time type options state host_name"""
-        response, keepalive = self.livestatus_broker.livestatus.handle_request(request)
-        print(response)
+        print("----------")
+        print("Request database logs")
         database = self.cfg_database
         collection = self.cfg_collection
         numlogs = self.livestatus_broker.db.conn[database][collection].count_documents({})
-        print("Logs count: %d" % numlogs)
+        print("- total logs count: %d" % numlogs)
         self.assertTrue(numlogs == 2)
         logs = self.livestatus_broker.db.conn[database][collection].find()
         # First log is the 2nd event...
@@ -443,7 +538,7 @@ class TestConfigBig(TestConfig):
         print("%s - Initial setup duration: %.2f seconds" % (time.strftime("%H:%M:%S"),
                                                              time.time() - setup_state_time))
 
-        self.cfg_database = 'testtest' + self.testid
+        self.cfg_database = 'test' + self.testid
         self.cfg_collection = 'ls-logs'
 
         dbmodconf = Module({
@@ -608,13 +703,13 @@ class TestConfigBig(TestConfig):
                 sys.stderr.write("%s - services changed and recovered\n" % (time.strftime("%H:%M:%S")))
                 self.update_broker()
 
+                sys.stderr.write("%s - day %d ended, it is %s\n" % (
+                    time.strftime("%H:%M:%S"), day, time.ctime(time.time())))
+
                 # Make the day have 24 hours -)
                 frozen_datetime.tick(delta=datetime.timedelta(hours=17))
 
                 self.livestatus_broker.db.commit()
-
-                sys.stderr.write("%s - day %d ended, it is %s\n" % (
-                    time.strftime("%H:%M:%S"), day, time.ctime(time.time())))
 
             sys.stdout.close()
             sys.stdout = old_stdout
@@ -628,7 +723,7 @@ class TestConfigBig(TestConfig):
         print("%s - logs count: %d" % (time.strftime("%H:%M:%S"), numlogs))
 
         # now we have a lot of events
-        # find type = HOST ALERT for test_host_005
+        # find type = HOST ALERT or SERVICE ALERT for test_host_099, service test_ok_01
         columns = (
             "class time type state host_name service_description plugin_output message options "
             "contact_name command_name state_type current_host_groups current_service_groups"
@@ -669,8 +764,6 @@ OutputFormat: json"""
         # ] },
         # { 'time' : { '$lte' : 1575331200 } },
         # { 'time' : { '$gte' : 1575072000 } }]
-        # switch back to realtime. we want to know how long it takes
-        time_hacker.set_real_time()
 
         tic = time.time()
         response, keepalive = self.livestatus_broker.livestatus.handle_request(request)

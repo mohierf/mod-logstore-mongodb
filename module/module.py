@@ -274,6 +274,10 @@ class LiveStatusLogStoreMongoDB(BaseModule):
     def get_live_data_log(self):
         """Like get_live_data, but for log objects"""
 
+        if not self.is_connected == CONNECTED:
+            logger.warning("[LogStoreMongoDB] sorry, not connected")
+            return []
+
         # finalize the filter stacks
         self.mongo_time_filter_stack.and_elements(self.mongo_time_filter_stack.qsize())
         self.mongo_filter_stack.and_elements(self.mongo_filter_stack.qsize())
@@ -289,8 +293,6 @@ class LiveStatusLogStoreMongoDB(BaseModule):
             # two dates and apply the Filter:-clauses in python
             mongo_filter_func = self.mongo_time_filter_stack.get_stack()
 
-        db_result = []
-        print("[LogstoreMongoDB] Mongo filter func: %s" % mongo_filter_func)
         mongo_filter = mongo_filter_func()
         logger.debug("[Logstore MongoDB] Mongo filter is %s", str(mongo_filter))
         # We can apply the filter_stack here as well. we have columns and filter_columns.
@@ -309,29 +311,23 @@ class LiveStatusLogStoreMongoDB(BaseModule):
             'host_name', 'message', 'plugin_output', 'service_description',
             'state', 'state_type', 'time', 'type'
         ]
-        if not self.is_connected == CONNECTED:
-            logger.warning("[LogStoreMongoDB] sorry, not connected")
-        else:
-            # Remove the sorting
-            # db_result = [
-            #     Logline([(c,) for c in columns], [x[col] for col in columns])
-            #     for x in self.db[self.collection].find(filter_element).sort(
-            #         [(u'time', pymongo.DESCENDING)])
-            # ]
-            db_count = self.db[self.collection].count_documents(filter_element)
-            print("[LogstoreMongoDB] Mongo collection count is: %d" % db_count)
-            # db_count = self.db[self.collection].find(filter_element).count()
-            # print("[LogstoreMongoDB] Mongo filtered collection count is: %d" % db_count)
-            # for x in self.db[self.collection].find(filter_element):
-            #     print("-: %s" % x)
 
-            db_result = [
-                Logline([(c,) for c in columns], [x[col] for col in columns])
-                for x in self.db[self.collection].find(filter_element)
-            ]
-            # print("[LogstoreMongoDB] Mongo db_result: %d" % len(db_result))
-            # for x in db_result:
-            #     print("-: %s" % x)
+        # Remove the sorting
+        # db_result = [
+        #     Logline([(c,) for c in columns], [x[col] for col in columns])
+        #     for x in self.db[self.collection].find(filter_element).sort(
+        #         [(u'time', pymongo.DESCENDING)])
+        # ]
+        db_count = self.db[self.collection].count_documents(filter_element)
+        print("[LogstoreMongoDB] Mongo filtered collection count is: %d" % db_count)
+
+        db_result = [
+            Logline([(c,) for c in columns], [x[col] for col in columns])
+            for x in self.db[self.collection].find(filter_element)
+        ]
+        print("[LogstoreMongoDB] Mongo db_result: %d" % len(db_result))
+        for x in db_result:
+            print("-: %s / %s" % (type(x), x))
         return db_result
 
     def make_mongo_filter(self, operator, attribute, reference):
@@ -339,13 +335,12 @@ class LiveStatusLogStoreMongoDB(BaseModule):
         # sql where-condition finally.
         # Add parameter Class (Host, Service), lookup datatype (default string), convert reference
         # which attributes are suitable for a sql statement
-        print("-make_mongo_filter for: %s / %s / %s" % (operator, attribute, reference))
 
         good_attributes = [
             'time', 'attempt', 'logclass', 'command_name', 'comment', 'contact_name', 'message',
             'host_name', 'plugin_output', 'service_description', 'state', 'state_type', 'type']
         # good_operators = ['=', '!=']
-        #  put strings in '' for the query
+        # string fields for the query
         string_attributes = [
             'command_name', 'comment', 'contact_name', 'host_name', 'message', 'plugin_output',
             'service_description', 'state_type', 'type']
@@ -469,11 +464,9 @@ class LiveStatusMongoStack(LiveStatusStack):
         # we let it pass in any case. That's no problem, because the result
         # of the database query will have to go through the in-memory-objects
         # filter too.
-        print("not_elements: add 'time exists'!")
+        # todo: check if all this speech is really true! Obviously not because of the current unit tests results!!!
         negate_filter = lambda: '\'time\' : { \'$exists\' : True }'
 
-        # def negate_filter():
-        #     return '\'time\' : { \'$exists\' : True }'
         self.put_stack(negate_filter)
 
     def and_elements(self, num):

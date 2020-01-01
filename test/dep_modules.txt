@@ -1,2 +1,2 @@
 https://github.com/mohierf/mod-livestatus.git
-https://github.com/shinken-monitoring/mod-logstore-sqlite.git
+https://github.com/mohierf/mod-logstore-sqlite.git
