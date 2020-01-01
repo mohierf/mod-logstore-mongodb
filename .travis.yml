@@ -1,24 +1,36 @@
 language: python
 python:
   - "2.7"
-  - "2.6"
 
 install:
+  - sudo apt-get update && sudo apt-get install -y python-pip libgnutls28-dev libssl-dev
   - ./test/setup_module_test.sh
-  - pip install importlib # this is a requirement of shinken
-  - export PYTHONPATH=$PYTHONPATH:~/shinken # we need shinken..
-  - export PYTHONPATH=$PYTHONPATH:~/shinken/test
-  - export PYTHONPATH=$PYTHONPATH:~/mod-livestatus/test # we also need mock_livestatus from mod-livestatus..
 
 script:
-  - mongodir=$(pwd)
-  # tests need to run from shinken test directory for access to test config files
-  #  (as long as the test config files are referenced with a relative path)
-  - cd ~/shinken/test
-  - nosetests -vx --with-coverage --cover-package=modules $mongodir/test
+  # Unit tests
+  - cur_dir=$PWD
+  - echo "Current directory '$cur_dir' ..."
+  - export PYTHONPATH=$PYTHONPATH:$PWD
+  - export PYTHONPATH=$PYTHONPATH:$PWD/test/tmp/shinken # we also need shinken test/modules...
+  - export PYTHONPATH=$PYTHONPATH:$PWD/test/tmp/shinken/test # we also need shinken test/modules...
+  - export PYTHONPATH=$PYTHONPATH:$PWD/test/tmp/shinken/test/modules/livestatus # we also need mock_livestatus from mod-livestatus..
+  - echo "Python path '$PYTHONPATH' ..."
+  - cd test/tmp/shinken/test
+#  - pytest -vv --durations=0 --no-print-logs --cov="$cur_dir"/module --cov-config "$cur_dir"/test/.coveragerc "$cur_dir"/test/test_*.py
+  - pytest -vv --durations=0 --no-print-logs --cov="$cur_dir"/module --cov-report=xml --cov-config "$cur_dir"/test/.coveragerc "$cur_dir"/test/test_*.py
+
+  # Static code analysis
+  - cd "$cur_dir"
+  # -- pycodestyle (former pep8)
+  # E731 do not assign a lambda expression, use a def
+  - pycodestyle --max-line-length=120 --ignore=E402,W503,E731 --exclude='*.pyc' module
+  # -- pylint
+  - pylint --rcfile=.pylintrc -r no module
+  # -- pep257
+  # - pep257 --select=D300 alignak
 
 after_success:
-  coveralls
+  - bash <(curl -s https://codecov.io/bash) -f test/tmp/shinken/test/coverage.xml
 
 notifications:
   email: false
