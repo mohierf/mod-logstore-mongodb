@@ -89,11 +89,14 @@ class LiveStatusLogStoreMongoDB(BaseModule):
             logger.warning('[LogStoreMongoDB] the parameter replica_set will be ignored. Use a mongodb uri instead.')
 
         self.database = getattr(modconf, 'database', 'shinken')
+        logger.info("[LogStore MongoDB] database name: %s", self.database)
         self.collection = getattr(modconf, 'collection', 'ls-logs')
-        self.use_aggressive_sql = True
+        logger.info("[LogStore MongoDB] collection name: %s", self.collection)
+
         self.mongodb_fsync = to_bool(getattr(modconf, 'mongodb_fsync', "True"))
-        max_logs_age = getattr(modconf, 'max_logs_age', '365')
-        maxmatch = re.match(r'^(\d+)([dwmy]*)$', max_logs_age)
+
+        self.max_logs_age = int(getattr(modconf, 'max_logs_age', '365'))
+        maxmatch = re.match(r'^(\d+)([dwmy]*)$', str(self.max_logs_age))
         if maxmatch is None:
             logger.warning('[LogStoreMongoDB] Wrong format for max_logs_age. '
                            'Must be <number>[d|w|m|y] or <number> and not %s', max_logs_age)
@@ -108,8 +111,10 @@ class LiveStatusLogStoreMongoDB(BaseModule):
             self.max_logs_age = int(maxmatch.group(1)) * 31
         elif maxmatch.group(2) == 'y':
             self.max_logs_age = int(maxmatch.group(1)) * 365
+        logger.info("[LogStore MongoDB] maximum log age: %d days", self.max_logs_age)
 
         self.use_aggressive_sql = (getattr(modconf, 'use_aggressive_sql', '1') == '1')
+        logger.info("[LogStore MongoDB] agressive SQL: %s", self.use_aggressive_sql)
         self.is_connected = DISCONNECTED
         self.backlog = []
 
