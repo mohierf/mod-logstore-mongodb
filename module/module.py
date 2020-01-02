@@ -50,9 +50,15 @@ LiveStatusStack = livestatus_broker.LiveStatusStack
 LOGCLASS_INVALID = livestatus_broker.LOGCLASS_INVALID
 Logline = livestatus_broker.Logline
 
+#############################################################################
+
+DEFAULT_LOGS_AGE = 7
+
 CONNECTED = 1
 DISCONNECTED = 2
 SWITCHING = 3
+
+#############################################################################
 
 properties = {
     'daemons': ['livestatus'],
@@ -95,7 +101,7 @@ class LiveStatusLogStoreMongoDB(BaseModule):
 
         self.mongodb_fsync = to_bool(getattr(modconf, 'mongodb_fsync', "True"))
 
-        self.max_logs_age = int(getattr(modconf, 'max_logs_age', '365'))
+        self.max_logs_age = getattr(modconf, 'max_logs_age', DEFAULT_LOGS_AGE)
         maxmatch = re.match(r'^(\d+)([dwmy]*)$', str(self.max_logs_age))
         if maxmatch is None:
             logger.warning('[LogStoreMongoDB] Wrong format for max_logs_age. '
